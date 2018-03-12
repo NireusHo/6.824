@@ -167,7 +167,7 @@ func (mr *Master) killWorkers() []int {
 		var reply ShutdownReply
 		ok := call(w, "Worker.Shutdown", new(struct{}), &reply)
 		if ok == false {
-			fmt.Printf("Master: RPC %s shutdown error\n", w)
+			fmt.Printf("Master: RPC %s shutdown errsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssor\n", w)
 		} else {
 			ntasks = append(ntasks, reply.Ntasks)
 		}

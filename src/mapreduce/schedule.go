@@ -1,6 +1,10 @@
 package mapreduce
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+	"sync"
+)
 
 //
 // schedule() starts and waits for all tasks in the given phase (Map
@@ -32,5 +36,49 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 	//
+
+	// schedule will wait until all worker has done their job
+	var wg sync.WaitGroup
+
+	var task DoTaskArgs
+	task.JobName = jobName
+	task.NumOtherPhase = n_other
+	task.Phase = phase
+
+	// dispatch task id via channel
+	var taskIDChan = make(chan int)
+	go func() {
+		for i := 0; i < ntasks; i++ {
+			wg.Add(1)
+			taskIDChan <- i
+		}
+		wg.Wait()
+		close(taskIDChan)
+	}()
+
+	// assign all task to worker
+	for taskID := range taskIDChan {
+		// get a worker to assign task
+		worker := <-registerChan
+
+		task.TaskNumber = taskID
+		if phase == mapPhase {
+			task.File = mapFiles[taskID]
+		}
+
+		// *Must use parameter, because worker is changing
+		go func(worker string, task DoTaskArgs) {
+			if ok := call(worker, "Worker.DoTask", &task, nil); ok {
+				wg.Done()
+				//put worker back to register channel, avoid deadlock
+				go func() { registerChan <- worker }()
+			} else {
+				log.Printf("Schedule: assign %s task %v to %s failed", phase, task.TaskNumber, worker)
+				// put failed task back for reassign
+				taskIDChan <- task.TaskNumber
+			}
+		}(worker, task)
+	}
+
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }

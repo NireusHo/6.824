@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
-	"xbmApi/log"
 )
 
 //
@@ -40,7 +39,6 @@ func reduceF(key string, values []string) string {
 	for _, value := range values {
 		i, err := strconv.Atoi(value)
 		if err != nil {
-			log.Error("reduceF :", err)
 			return ""
 		}
 		sum += i
