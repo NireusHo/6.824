@@ -179,9 +179,6 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int  // currentTerm, for leader to update itself
 	Success bool // true if follower contained entry matching prevLogIndex and PrevLogTerm
-
-	ConflictTerm  int // term of conflicting entry
-	ConflictIndex int // the first index of conflicting term
 }
 
 //
@@ -368,6 +365,10 @@ func Make(Peers []*labrpc.ClientEnd, me int,
 	rf.nextIndex = make([]int, len(Peers))
 	rf.matchIndex = make([]int, len(Peers))
 
+	for i := range Peers {
+		rf.matchIndex[i] = len(rf.Logs)
+	}
+
 	rf.electionInterval = time.Duration(electionTime+rand.Intn(300)) * time.Millisecond
 	rf.electionTimer = time.NewTimer(rf.electionInterval)
 	rf.heartbeatInterval = heartbeatTime * time.Millisecond
@@ -375,9 +376,6 @@ func Make(Peers []*labrpc.ClientEnd, me int,
 	DPrintf("peer[%d]: electionTime [%dms], heartbeatTime [%dms]", rf.me, rf.electionInterval/time.Millisecond, rf.heartbeatInterval/time.Millisecond)
 
 	rf.commitIndexCond = sync.NewCond(&rf.mu)
-
-	rf.lastApplied = rf.snapshotIndex
-	rf.commitIndex = rf.snapshotIndex
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
@@ -390,7 +388,6 @@ func Make(Peers []*labrpc.ClientEnd, me int,
 				rf.electionTimer.Reset(rf.electionInterval)
 			case <-rf.electionTimer.C:
 				go rf.newElection()
-				rf.electionTimer.Reset(rf.electionInterval)
 			}
 		}
 	}()
@@ -402,9 +399,7 @@ func Make(Peers []*labrpc.ClientEnd, me int,
 
 			// wait for sending unApplied log
 			rf.mu.Lock()
-			for rf.lastApplied == rf.commitIndex {
-				rf.commitIndexCond.Wait()
-			}
+			rf.commitIndexCond.Wait()
 			if rf.lastApplied < rf.commitIndex {
 				unAppliedLog = make([]LogEntry, rf.commitIndex-rf.lastApplied)
 				// including rf.logs[commitIndex]
@@ -444,14 +439,12 @@ func (rf *Raft) newElection() {
 	for i := range rf.Peers {
 		wg.Add(1)
 		go func(j int) {
-			if rf.state == Candidate {
-				defer wg.Done()
-				DPrintf("Peers[%d]Term[%d]->Peers[%d]", rf.me, rf.CurrentTerm, j)
-				rf.sendRequestVote(j, voteArgs, &replies[j])
-			}
-
+			defer wg.Done()
+			DPrintf("Peers[%d]Term[%d]->Peers[%d]", rf.me, rf.CurrentTerm, j)
+			rf.sendRequestVote(j, voteArgs, &replies[j])
 		}(i)
 	}
+	rf.resetElectionTimer <- struct{}{}
 	wg.Wait()
 	DPrintf("Peers[%d] counting the votes", rf.me)
 
@@ -483,59 +476,32 @@ func (rf *Raft) newElection() {
 func (rf *Raft) heartBeats() {
 	for {
 		if _, isLeader := rf.GetState(); isLeader {
+			args := rf.newAppendEntriesArgs()
+			for i := range rf.Peers {
+				if i != rf.me {
+					go func(j int) {
+						var reply AppendEntriesReply
+						rf.sendAppendEntries(j, args, &reply)
+
+						// heartBeats failed
+						if !reply.Success {
+							if reply.Term > rf.CurrentTerm {
+								rf.CurrentTerm = reply.Term
+								rf.mu.Lock()
+								rf.turnTo(Follower)
+								rf.mu.Unlock()
+
+							}
+						}
+					}(i)
+				}
+			}
+			rf.resetElectionTimer <- struct{}{}
+			time.Sleep(rf.heartbeatInterval)
+		} else {
 			return
 		}
-		for i := range rf.Peers {
-			if i != rf.me {
-				go rf.checkConsistency(i)
-			}
-		}
-		rf.resetElectionTimer <- struct{}{}
-		time.Sleep(rf.heartbeatInterval)
 	}
-}
-
-func (rf *Raft) checkConsistency(server int) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	// snapshot get more log than server
-	if rf.nextIndex[server]-1 < rf.snapshotIndex {
-		rf.sendSnapshot(server)
-	} else {
-		var args = AppendEntriesArgs{
-			Term:         rf.CurrentTerm,
-			LeaderID:     rf.me,
-			PrevLogIndex: rf.nextIndex[server] - 1,
-			PrevLogTerm:  rf.Logs[rf.nextIndex[server]-1-rf.snapshotIndex].Term,
-			Entries:      nil, // nil for heartbeats
-			LeaderCommit: rf.commitIndex,
-		}
-		if rf.nextIndex[server] < len(rf.Logs)+rf.snapshotIndex {
-			args.Entries = append(args.Entries, rf.Logs[rf.nextIndex[server]-rf.snapshotIndex:]...)
-		}
-		go func() {
-			DPrintf("Peers[%d] send append Entries to Peers[%]", rf.me, server)
-			var reply AppendEntriesReply
-			if rf.sendAppendEntries(server, &args, &reply) {
-				rf.checkAppendEntriesReply(server, &reply)
-			}
-		}()
-	}
-}
-
-func (rf *Raft) checkAppendEntriesReply(server int, reply *AppendEntriesReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if rf.state != Leader {
-		return
-	}
-
-}
-
-func (rf *Raft) sendSnapshot(server int) {
-
 }
 
 func (rf *Raft) newRequestVoteArgs() *RequestVoteArgs {
