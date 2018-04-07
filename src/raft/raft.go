@@ -203,9 +203,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		if rf.VotedFor == -1 || rf.VotedFor == args.CandidateID {
 			// check candidate's log is at least as update
 			if (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex) || args.LastLogTerm > lastLogTerm {
-
 				rf.resetElectionTimer <- struct{}{}
-
 				rf.turnTo(Follower)
 				rf.VotedFor = args.CandidateID
 				reply.VoteGranted = true
