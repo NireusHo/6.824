@@ -187,6 +187,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	lastLogIndex, lastLogTerm := rf.lastLogInfo()
+
 	if args.Term < rf.CurrentTerm {
 		reply.Term = rf.CurrentTerm
 		reply.VoteGranted = false
@@ -200,10 +202,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// null(Follower) or (Voted for itself)candidate
 		if rf.VotedFor == -1 || rf.VotedFor == args.CandidateID {
 			// check candidate's log is at least as update
-			lastLogIndex, lastLogTerm := rf.lastLogInfo()
-
-			if (args.LastLogIndex == lastLogTerm && args.LastLogIndex >= lastLogIndex) ||
-				args.LastLogTerm > lastLogTerm {
+			if (args.LastLogTerm == lastLogTerm && args.LastLogIndex >= lastLogIndex) || args.LastLogTerm > lastLogTerm {
 
 				rf.resetElectionTimer <- struct{}{}
 
@@ -213,7 +212,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 			}
 		}
 	}
-	DPrintf("Peers[%d]Term[%d]->peer[%d]Term[%d] Vote:%t", rf.me, rf.CurrentTerm, args.CandidateID, args.Term, reply.VoteGranted)
+	DPrintf("Peers[%d]->peer[%d] Vote:%t Term %d->%d, index %d->%d", rf.me, args.CandidateID, reply.VoteGranted, rf.CurrentTerm, args.LastLogTerm, lastLogIndex, args.LastLogIndex)
 }
 
 //
@@ -638,6 +637,7 @@ func (rf *Raft) consistencyCheck(server int) {
 					// find newer
 					if reply.Term > args.Term {
 						if reply.Term > rf.CurrentTerm {
+							DPrintf("Peer[%d]Term[%d]: found new term from peer[%d]Term[%d], turn to follower.", rf.me, rf.CurrentTerm, server, reply.Term)
 							rf.CurrentTerm = reply.Term
 							rf.VotedFor = -1
 							if rf.state == Leader {
@@ -651,7 +651,6 @@ func (rf *Raft) consistencyCheck(server int) {
 							}
 							rf.mu.Unlock()
 							rf.resetElectionTimer <- struct{}{}
-							DPrintf("[%d]:found newer term (heartbeat resp from peer[%d]Term[%d]), turn to follower.", rf.me, server, reply.Term)
 
 							return
 						}
