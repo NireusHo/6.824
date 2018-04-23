@@ -615,20 +615,18 @@ func Make(Peers []*labrpc.ClientEnd, me int,
 			rf.mu.Lock()
 			for rf.lastApplied == rf.commitIndex {
 				rf.commitIndexCond.Wait()
-				select {
-				case <-rf.shutdown:
+				if rf.isShutDown() {
 					rf.mu.Unlock()
 					DPrintf("Peer[%d]Term[%d] is shutdown - ApplyLogDaemon", rf.me, rf.CurrentTerm)
 					close(rf.applyCh)
 					return
-				default:
 				}
 			}
 			last, cur := rf.lastApplied, rf.commitIndex
 			if last < cur {
 				rf.lastApplied = rf.commitIndex
 				logs = make([]LogEntry, cur-last)
-				copy(logs, rf.Logs[last+1:cur+1])
+				copy(logs, rf.Logs[rf.LogOffset(last)+1:rf.LogOffset(cur)+1])
 			}
 			rf.mu.Unlock()
 
@@ -734,8 +732,8 @@ func (rf *Raft) updateCommitIndex() {
 		rf.me, rf.CurrentTerm, rf.matchIndex)
 
 	target := match[len(rf.Peers)/2]
-	if rf.commitIndex < target {
-		if rf.Logs[target].Term == rf.CurrentTerm {
+	if rf.commitIndex < target && rf.snapshotIndex < target {
+		if rf.Logs[rf.LogOffset(target)].Term == rf.CurrentTerm {
 			DPrintf("Peers[%d]Term[%d]: update commit index %d -> %d",
 				rf.me, rf.CurrentTerm, rf.commitIndex, target)
 			rf.commitIndex = target
@@ -819,14 +817,13 @@ func (rf *Raft) NewSnapShot(index int) {
 	rf.persist()
 }
 
-func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply InstallSnapshotReply) {
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
 	reply.Term = rf.CurrentTerm
 
-	select {
-	case <-rf.shutdown:
+	if rf.isShutDown() {
 		DPrintf("Peer[%d]Term[%d] is shutdown - InstallSnapshot", rf.me, rf.CurrentTerm)
 		return
 	}
@@ -837,6 +834,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply InstallSnapshot
 		return
 	}
 
+	// may have duplicate snapshot
 	if args.LastIncludedIndex <= rf.snapshotIndex {
 		DPrintf("Peer[%d]Term[%d]: InstallSnapshot- args.LastIncludedIndex[%d] < rf.snapshotIndex[%d]",
 			rf.me, rf.CurrentTerm, args.LastIncludedIndex, rf.snapshotIndex)
@@ -845,39 +843,37 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply InstallSnapshot
 
 	rf.resetElectionTimer <- struct{}{}
 
-	// snapshot has all logs
-	if args.LastIncludedIndex >= rf.snapshotIndex+len(rf.Logs)-1 {
-		DPrintf("Peer[%d]Term[%d]: InstallSnapshot- have all logs %d < %d+%d-1",
-			rf.me, rf.CurrentTerm, args.LastIncludedIndex, rf.snapshotIndex, len(rf.Logs)-1)
+	// snapshot have all logs
+	if args.LastIncludedIndex >= rf.LogIndex() {
+		DPrintf("Peer[%d]Term[%d]: InstallSnapshot- have all logs： LastIncludedIndex:%d LogIndex:%d",
+			rf.me, rf.CurrentTerm, args.LastIncludedIndex, rf.LogIndex())
 
-		// compact all logs
-		rf.Logs = []LogEntry{
-			{rf.snapshotTerm, nil},
-		}
+		rf.snapshotIndex = args.LastIncludedIndex
+		rf.snapshotTerm = args.LastIncludedTerm
+		rf.commitIndex = rf.snapshotIndex
+		rf.lastApplied = rf.snapshotIndex
+		rf.Logs = []LogEntry{{rf.snapshotTerm, nil}}
 
-		// snapshot	has part of logs
-	} else {
-		DPrintf("Peer[%d]Term[%d]: InstallSnapshot- have part of logs %d < %d+%d-1",
-			rf.me, rf.CurrentTerm, args.LastIncludedIndex, rf.snapshotIndex, len(rf.Logs))
+		rf.applyCh <- ApplyMsg{rf.snapshotIndex, nil, true, args.Snapshot}
 
-		// compact logs before args.LastIncludedIndex
-		rf.Logs = rf.Logs[args.LastIncludedIndex-rf.snapshotIndex:]
+		rf.persist()
+		return
 	}
 
+	// snapshot contains part of logs
+	DPrintf("Peer[%d]Term[%d]: InstallSnapshot- have part of logs： LastIncludedIndex:%d LogIndex:%d",
+		rf.me, rf.CurrentTerm, args.LastIncludedIndex, rf.LogIndex())
+
+	rf.Logs = rf.Logs[args.LastIncludedIndex-rf.snapshotIndex:]
 	rf.snapshotIndex = args.LastIncludedIndex
 	rf.snapshotTerm = args.LastIncludedTerm
-
 	rf.commitIndex = rf.snapshotIndex
 	rf.lastApplied = rf.snapshotIndex
 
-	rf.applyCh <- ApplyMsg{
-		rf.snapshotIndex,
-		nil,
-		true,
-		args.Snapshot,
-	}
+	rf.applyCh <- ApplyMsg{rf.snapshotIndex, nil, true, args.Snapshot}
 
 	rf.persist()
+
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
