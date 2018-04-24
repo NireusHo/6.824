@@ -587,6 +587,9 @@ func Make(Peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
+	rf.lastApplied = rf.snapshotIndex
+	rf.commitIndex = rf.snapshotIndex
+
 	// electionDaemon
 	go func() {
 		for {
@@ -740,7 +743,7 @@ func (rf *Raft) updateCommitIndex() {
 			go func() { rf.commitIndexCond.Broadcast() }()
 		} else {
 			DPrintf("Peers[%d]Term[%d]: update commit index %d failed (log term %d != current Term %d)",
-				rf.me, rf.CurrentTerm, rf.commitIndex, rf.commitIndex, rf.Logs[target].Term)
+				rf.me, rf.CurrentTerm, rf.commitIndex, rf.commitIndex, rf.Logs[rf.LogOffset(target)].Term)
 		}
 	}
 }
