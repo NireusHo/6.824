@@ -16,7 +16,7 @@ type Clerk struct {
 
 	lastLeader int   // last lastLeader
 	SeqNo      int   // RPC SeqNo number
-	id         int64 // client id
+	clientID   int64 // client ID
 }
 
 func nrand() int64 {
@@ -43,9 +43,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	// You'll have to add code here.
 	ck.lastLeader = 0
 	ck.SeqNo = 1
-	ck.id = genrateID()
+	ck.clientID = genrateID()
 
-	DPrintf("New Clerk lastLeader:%d id:%d", ck.lastLeader, ck.id)
+	DPrintf("New Clerk lastLeader:%d clientID:%d", ck.lastLeader, ck.clientID)
 	return ck
 }
 
@@ -66,7 +66,7 @@ func (ck *Clerk) Get(key string) string {
 	for {
 		args := &GetArgs{
 			key,
-			ck.id,
+			ck.clientID,
 			ck.SeqNo,
 		}
 		reply := &GetReply{}
@@ -113,7 +113,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			key,
 			value,
 			op,
-			ck.id,
+			ck.clientID,
 			ck.SeqNo,
 		}
 		reply := &PutAppendReply{}

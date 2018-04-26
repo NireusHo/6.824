@@ -25,7 +25,7 @@ type Op struct {
 	Key      string
 	Value    string
 	Op       string // "Get", "Put" or "Append"
-	ClientID int64  // client id
+	ClientID int64  // client clientID
 	SeqNo    int    // request sequence number
 }
 
