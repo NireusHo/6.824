@@ -133,7 +133,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			DPrintf("Peer[%d]Term[%d]: Append Entries - leader[%d] has more logs (%d > %d), reply: Term[%d]Index[%d]", rf.me, rf.CurrentTerm, args.LeaderID, args.PrevLogIndex, len(rf.Logs)-1, reply.ConflictTerm, reply.ConflictIndex)
 		} else {
 			DPrintf("Peer[%d]Term[%d]: Append Entries - leader[%d], pre index/term mismatch (%d != %d, %d != %d)",
-				rf.me, rf, args.LeaderID, args.PrevLogIndex, preLogIndex, args.PrevLogTerm, preLogTerm)
+				rf.me, rf.CurrentTerm, args.LeaderID, args.PrevLogIndex, preLogIndex, args.PrevLogTerm, preLogTerm)
 		}
 	}
 	rf.persist()
