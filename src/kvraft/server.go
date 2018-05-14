@@ -109,6 +109,7 @@ func (kv *RaftKV) Get(args *GetArgs, reply *GetReply) {
 		if value, ok := kv.db[args.Key]; ok {
 			reply.Value = value
 			reply.Err = OK
+			DPrintf("Peer[%d]: Get request for Key[%q] Value:%s", kv.me, args.Key, value)
 		} else {
 			reply.Err = ErrNoKey
 		}
